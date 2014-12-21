@@ -10,46 +10,80 @@
 
 #include "Lexer.hpp"
 #include <iostream>
+#include <map>
+#include <stack>
+#include <list>
+#include <string>
 
 enum Action {
 	CREATE, DELETE, INSERT, QUERY, INVALID,
 };
 
-enum Op {
+//arithmetic operators
+//for parser only
+enum ArithOp {
 	PLUS, // +, both unary and binary
 	MINUS, // -, both unary and binary
 	MULTIPLY, // *
 	DIVIDE, // /
-	LT, // <
-	GT, // >
-	NE, // <>
-	E, // ==
-	GTE, // >=
-	LTE, // <=
-	AND, // &&
-	OR, // ||
-	NOT, // !
-	EQ, // =
+	E, // =
 	LB, // (
 	RB, // )
 	COMMA, // ,
 };
 
-struct Condition {
-	// left operand
-	std::string lop;
-	// right operand
-	std::string rop;
-	// operator
-	Op op;
+//boolean operators
+enum BoolOp {
+	LT, // <
+	GT, // >
+	NE, // <>
+	EQ, // ==
+	GTE, // >=
+	LTE, // <=
+	AND, // &&
+	OR, // ||
+	NOT, // !
 };
 
 /*
- * Only int current
+ * reduce to boolean tree
+ * only contains boolean operations for <id, num> or <id, id> pairs
  */
-enum PropType {
-	INT,
+
+struct Condition {
+	/*
+	 * operand
+	 * 		ID
+	 * 		NUM
+	 */
+	// operator
+	BoolOp op;
+
+	//TODO:
+	//use isNum and isId to check opd
+	std::string opd;
+
+	// left operand
+	Condition* lc;
+
+	//right
+	Condition* rc;
+
+	Condition(BoolOp o) {
+		op = o;
+		lc = rc = NULL;
+	}
 };
+
+/*
+ * parser tree:
+ * tree->ID OP NUM
+ * 		| ID OP ID
+ * 		| NUM OP NUM
+ * 		| NUM OP ID
+ * 		| tree OP tree
+ * NOT operator generate right subtree
+ */
 
 struct Property {
 	/*
@@ -58,14 +92,11 @@ struct Property {
 	 * length of an identifier is 64.
 	 */
 	std::string id;
+
 	/*
-	 * property type
+	 default 0 for default value if no default specified
 	 */
-	PropType type;
-	/*
-	 0 for default value
-	 */
-	std::string default_value;
+	int default_value;
 
 	bool operator==(const Property& o) {
 		return o.id == id;
@@ -87,14 +118,25 @@ struct Statement {
 	 * list of properties to return
 	 * used with select and create
 	 */
-
-	std::list<Property> prop_list;
+	std::vector<Property> prop_list;
 
 	/*
-	 * list of conditions
-	 * used with where
+	 * location of primary key
+	 * used with create
+	 * -1 for no primary key
 	 */
-	std::list<Condition> conds;
+	int key_idx;
+
+	/*
+	 * value list, only for insert
+	 */
+	std::vector<int> value_list;
+
+	/*
+	 * boolean tree
+	 * NULL for none(insert and
+	 */
+	Condition* cond;
 };
 
 /*ERROR Handling
@@ -141,8 +183,6 @@ private:
 	 *   # of columns in primary key declaration <= 100
 	 */
 
-	Statement parseCreate(const std::list<Token>& token_list);
-
 	/*INSERT
 	 *
 	 * insert_stmt → insert into id(column_list) values (value_list);
@@ -153,8 +193,6 @@ private:
 	 *    # of columns should equal to # of values
 	 */
 
-	Statement parseInsert(const std::list<Token>& token_list);
-
 	/*DELETE
 	 *
 	 * delete_stmt → delete from id where_clause;
@@ -162,8 +200,6 @@ private:
 	 * To check:
 	 *
 	 */
-
-	Statement parseDelete(const std::list<Token>& token_list);
 
 	/*SELECT
 	 *
@@ -174,11 +210,9 @@ private:
 	 *
 	 */
 
-	Statement parseSelect(const std::list<Token>& token_list);
+	Condition* parseWhere(std::list<Token> ts);
 
 	/*WHERE
-	 * Return paired and reduced condition list
-	 *
 	 * where_clause → where conjunct_list | ε
 	 *     conjunct_list → bool | conjunct_list && bool
 	 *     bool →operand rop operand
@@ -188,35 +222,19 @@ private:
 	 * To check
 	 *
 	 */
-
-	std::list<Condition> parseWhere(const std::list<Token>& token_list);
-
+	Lexer* lexer;
+	void initTable();
+	void initTerminal();
+	void initAction();
+	typedef void (*act)(Statement &s, Token t, std::string last);
+	std::map<std::pair<std::string, std::string>, std::list<std::string> > table;
+	std::set<std::string> terminal;
+	std::map<std::string, act> action;
+	std::stack<std::string> procedure;
+	std::string getTokenSymbol(Token t);
 public:
 	Parser();
-	Statement Parse(const std::list<Token>& token_list) {
-		TokenType t = token_list.front().type;
-
-		Statement wt;
-		wt.act = INVALID;
-		if (t != KEYWORD) {
-			std::cerr << "Illegal \n";
-			return wt;
-		}
-
-		std::string op_type = token_list.front().value;
-		if (op_type == "CREATE") {
-			return parseSelect(token_list);
-		} else if (op_type == "INSERT") {
-			return parseInsert(token_list);
-		} else if (op_type == "DELETE") {
-			return parseDelete(token_list);
-		} else if (op_type == "SELECT") {
-			return parseSelect(token_list);
-		} else {
-			std::cerr << "Unknown Keywords\n";
-			return wt;
-		}
-	}
+	Statement Parse(const std::string& s);
 };
 
 #endif /* PARSER_HPP_ */
